@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  # Without this every push to a branch started a full parallel run and left
+  # the previous one running — three pushes seconds apart meant three live
+  # runs competing for the same shared runner pool. Superseded PR runs are
+  # cancelled; pushes to the default branch are not, because cancelling one
+  # would skip an image push and strand the deploy.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: Build, vet, test
