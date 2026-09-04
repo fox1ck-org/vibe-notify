@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build, vet, test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: notify
+          POSTGRES_PASSWORD: notify
+          POSTGRES_DB: notify
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      # The outbox tests skip without a database rather than passing silently,
+      # so the DSN has to be set here or the durable tier ships untested.
+      - name: Test
+        env:
+          TEST_DATABASE_URL: postgres://notify:notify@localhost:5432/notify?sslmode=disable
+        run: go test -race ./...
