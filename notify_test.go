@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -184,5 +185,37 @@ func TestEmitRejectsInvalidBeforeSending(t *testing.T) {
 	}
 	if called {
 		t.Fatal("a malformed envelope must not reach the network")
+	}
+}
+
+// A refusal that will be given again forever must be distinguishable from an
+// outage. Without this the vibe-fb relay retried the same Kafka batch 65 times
+// against a host that had no backend at all (2026-09-16), and no notification
+// from any of the three emitting services was ever delivered.
+func TestAPermanentRefusalIsNotAnOutage(t *testing.T) {
+	cases := []struct {
+		status    int
+		permanent bool
+		why       string
+	}{
+		{404, true, "nobody is home at that address"},
+		{400, true, "the envelope is wrong and will stay wrong"},
+		{401, true, "the secret is wrong until somebody changes it"},
+		{408, false, "a timeout is explicitly later, not never"},
+		{429, false, "rate limiting is explicitly later"},
+		{500, false, "the hub is down"},
+		{503, false, "the hub is down"},
+	}
+	for _, c := range cases {
+		err := error(&HTTPError{EventType: "fb.adaccount.disabled", StatusCode: c.status, Body: "x"})
+		if got := IsPermanent(err); got != c.permanent {
+			t.Errorf("status %d: permanent=%v, want %v — %s", c.status, got, c.permanent, c.why)
+		}
+	}
+	if IsPermanent(errors.New("dial tcp: connection refused")) {
+		t.Error("a transport failure is an outage, never a permanent refusal")
+	}
+	if IsPermanent(nil) {
+		t.Error("no error is not a permanent refusal")
 	}
 }
