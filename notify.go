@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -228,9 +229,55 @@ func (c *Client) Emit(ctx context.Context, env Envelope) error {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("notify: %s returned %d: %s", env.EventType, resp.StatusCode, string(b))
+		return &HTTPError{EventType: env.EventType, StatusCode: resp.StatusCode, Body: string(b)}
 	}
 	return nil
+}
+
+// HTTPError is a refusal the hub gave, with the status still readable.
+//
+// It exists so a caller can tell "the hub is down, try later" from "the hub
+// will say this again forever". On 2026-09-16 it could not: webhooks.igrudsky.dev
+// had no backend at all, every Emit answered `404 page not found`, and the
+// vibe-fb relay — which retries the whole Kafka batch on any error — sat at
+// attempt 65 on the same 500 records. Three services emit to that host; all
+// three had the same hole.
+type HTTPError struct {
+	EventType  string
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("notify: %s returned %d: %s", e.EventType, e.StatusCode, e.Body)
+}
+
+// Permanent reports whether sending the SAME envelope again can ever succeed.
+//
+// A 4xx is the hub (or whatever answers on its address) saying the request is
+// wrong or nobody is home: the bytes will not become acceptable by being sent
+// again. 408 and 429 are the exceptions — both are explicitly "later", not
+// "never". A 5xx or a transport failure is an outage and stays retryable.
+func (e *HTTPError) Permanent() bool {
+	if e == nil {
+		return false
+	}
+	switch e.StatusCode {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return e.StatusCode >= 400 && e.StatusCode < 500
+}
+
+// IsPermanent is the check a caller writes: true when retrying this exact
+// envelope is pointless, so it should be recorded as undeliverable and the
+// work behind it allowed to move on.
+func IsPermanent(err error) bool {
+	var he *HTTPError
+	if errors.As(err, &he) {
+		return he.Permanent()
+	}
+	return false
 }
 
 // EmitAsync is fire-and-forget: it logs a failure and never blocks or breaks
