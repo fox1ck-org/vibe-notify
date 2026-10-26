@@ -16,8 +16,7 @@ import (
 func TestNilClientIsSafe(t *testing.T) {
 	// The whole reason NewClient returns nil for an empty base URL: a service
 	// must run locally, and its tests must run in CI, without a hub.
-	var c *Client
-	c = NewClient("", "vibe-accounts", nil)
+	c := NewClient("", "vibe-accounts", nil)
 	if c != nil {
 		t.Fatal("expected nil client for an empty base URL")
 	}

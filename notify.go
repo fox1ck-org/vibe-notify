@@ -28,6 +28,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -72,6 +73,18 @@ const (
 	ChannelWebPush    Channel = "web_push"
 	ChannelEmail      Channel = "email"
 	ChannelMattermost Channel = "mattermost"
+	ChannelTelegram   Channel = "telegram"
+	ChannelWebhook    Channel = "webhook"
+)
+
+// Visibility gates shared delivery. A personal event reaches only its
+// recipients' own channels; only an org event may reach an org's shared
+// destinations (a team Telegram chat, a Mattermost channel, a webhook).
+type Visibility string
+
+const (
+	VisibilityPersonal Visibility = "personal"
+	VisibilityOrg      Visibility = "org"
 )
 
 // Envelope is the wire contract. Field names are snake_case to match the Zod
@@ -102,6 +115,31 @@ type Envelope struct {
 	CollapseKey string     `json:"collapse_key,omitempty"`
 	Tone        Tone       `json:"tone,omitempty"`
 	SoundClass  SoundClass `json:"sound_class,omitempty"`
+
+	// OrgID is the tenant (console org id). Required when Visibility is org.
+	OrgID string `json:"org_id,omitempty"`
+	// Visibility defaults to personal on the hub when empty.
+	Visibility Visibility `json:"visibility,omitempty"`
+	// Resource is what the event is about; channels render it and filters
+	// match on it. Build it with Res.
+	Resource *Resource `json:"resource,omitempty"`
+	// Facts are key/value lines every channel renders, at most MaxFacts.
+	// Build them with F.
+	Facts []Fact `json:"facts,omitempty"`
+	// Actions become buttons, at most MaxActions. Build them with Link
+	// (opens a URL) or Callback (the hub calls the product back).
+	Actions []Action `json:"actions,omitempty"`
+}
+
+// MarshalJSON sends a shared-only event's empty recipients as [] rather than
+// null — the hub's schema takes an array, and a nil slice would be a 400.
+func (e Envelope) MarshalJSON() ([]byte, error) {
+	type wire Envelope
+	w := wire(e)
+	if w.Recipients == nil {
+		w.Recipients = []string{}
+	}
+	return json.Marshal(w)
 }
 
 // Validate mirrors the receiving Zod schema so a malformed envelope fails here,
@@ -114,13 +152,13 @@ func (e Envelope) Validate() error {
 		return fmt.Errorf("notify: source is required")
 	case e.EventType == "":
 		return fmt.Errorf("notify: event_type is required")
-	case len(e.Recipients) == 0:
-		return fmt.Errorf("notify: at least one recipient is required")
+	case len(e.Recipients) == 0 && (e.OrgID == "" || e.Visibility != VisibilityOrg):
+		return fmt.Errorf("notify: at least one recipient is required (empty only for an org-visibility event with org_id)")
 	case e.Title == "":
 		return fmt.Errorf("notify: title is required — it is what a human reads")
-	case len(e.Title) > 200:
+	case utf8.RuneCountInString(e.Title) > 200:
 		return fmt.Errorf("notify: title exceeds 200 characters")
-	case len(e.Body) > 2000:
+	case utf8.RuneCountInString(e.Body) > 2000:
 		return fmt.Errorf("notify: body exceeds 2000 characters")
 	case e.Deeplink == "":
 		return fmt.Errorf("notify: deeplink is required")
@@ -130,7 +168,7 @@ func (e Envelope) Validate() error {
 	default:
 		return fmt.Errorf("notify: invalid priority %q", e.Priority)
 	}
-	return nil
+	return e.validateOrgFields()
 }
 
 type Option func(*Client)

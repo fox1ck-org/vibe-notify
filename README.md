@@ -5,17 +5,46 @@ The Go emitter for the platform notification hub. A service calls it to say
 channels, per-user preferences, quiet hours, modes, sound, deduplication,
 threading — belongs to the hub.
 
-```go
-notifier := notify.NewClient(os.Getenv("PLATFORM_API_URL"), "vibe-accounts", logger)
+## How to connect a product
 
-env := notifier.NewEnvelope("accounts.request.opened", recipients)
-env.Priority = notify.PriorityWarning
-env.Category = "request"
-env.Title = "New order to fulfil"
-env.Deeplink = "https://accounts.igrudsky.dev/requests/" + id
-env.ThreadKey = "accounts.request:" + id
-notifier.EmitAsync(ctx, env)
-```
+1. **Take the module.** `go get github.com/fox1ck-org/vibe-notify@v0.3.0` (public; the
+   default `GOPROXY` resolves it — no `GOPRIVATE` needed).
+2. **Wire the env.** Set `NOTIFY_HUB_URL` (and `NOTIFY_HMAC_SECRET` when the hub
+   checks signatures) in the product's manifest in vibe-infra; the secret comes from
+   ESO (`/vibe/prod/<app>`), never a literal. Unset means notifications are no-ops.
+3. **Build the client once** at startup:
+   ```go
+   notifier := notify.NewClientFromEnv("vibe-cards", logger)
+   ```
+   (`notify.NewClient(url, source, logger, opts...)` stays for explicit wiring.)
+4. **Emit** with an `event_type` from the catalog (see below):
+   ```go
+   env := notifier.NewEnvelope("cards.card.frozen", recipients) // may be nil for a shared-only org event
+   env.OrgID, env.Visibility = orgID, notify.VisibilityOrg            // only org events reach shared destinations
+   env.Category, env.Priority = "card", notify.PriorityWarning
+   env.Title = "Card frozen"
+   env.Deeplink = "https://cards.igrudsky.dev/cards/" + id
+   env.Resource = notify.Res("card", id, "Visa *4242", env.Deeplink)
+   env.Facts = []notify.Fact{notify.F("Balance", "$12.40")}         // ≤ 10
+   env.Actions = []notify.Action{                                     // ≤ 4
+       notify.Link("open", "Open", env.Deeplink).Primary(),
+       notify.Callback("unfreeze", "Unfreeze"),                       // hub calls the product back
+   }
+   notifier.EmitAsync(ctx, env) // or outbox.Enqueue when a person is waiting — see below
+   ```
+5. **Test it** against the fake hub:
+   ```go
+   hub := notifytest.New(t)
+   svc := cards.New(hub.Client("vibe-cards"))
+   // ... act ...
+   hub.RequireEmitted(t, "cards.card.frozen", notifytest.Org(orgID), notifytest.HasAction("unfreeze"))
+   ```
+
+`Validate` mirrors the hub's Zod schema (`vibe-platform`
+`packages/notifications/src/types/event.ts`), limits included: `recipients` may be
+empty only with `org_id` set and `visibility = "org"`; resource kind ≤ 64 / id ≤ 160 /
+label ≤ 200; fact label ≤ 64 / value ≤ 500; action id ≤ 64 / label ≤ 40, unique ids,
+style `primary|danger|default`; URLs absolute. Change both sides in lockstep.
 
 ## Why this is its own module
 
@@ -28,7 +57,7 @@ service nothing.
 
 ## `NewClient("")` returns nil, and that is deliberate
 
-Every method is nil-safe. A service with no `PLATFORM_API_URL` configured runs
+Every method is nil-safe. A service with no `NOTIFY_HUB_URL` configured runs
 locally and in CI with notifications as no-ops rather than errors. Don't "fix"
 this by returning a stub.
 
