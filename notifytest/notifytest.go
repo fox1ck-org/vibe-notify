@@ -182,6 +182,11 @@ func HasAction(id string) Matcher {
 	})
 }
 
+// ToDestination matches an envelope naming this destination in DestinationIDs.
+func ToDestination(id string) Matcher {
+	return Match("destination "+id, func(e notify.Envelope) bool { return slices.Contains(e.DestinationIDs, id) })
+}
+
 // RequireEmitted fails the test unless an accepted envelope has eventType and
 // satisfies every matcher, and returns the first one that does.
 func (h *Hub) RequireEmitted(t testing.TB, eventType string, matchers ...Matcher) notify.Envelope {
