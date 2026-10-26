@@ -29,6 +29,16 @@ func TestValidateRejectsBadOrgFields(t *testing.T) {
 		"duplicate action id":        func(e *Envelope) { e.Actions = []Action{Callback("ok", "A"), Callback("ok", "B")} },
 		"bad action style":           func(e *Envelope) { e.Actions = []Action{{ID: "ok", Label: "OK", Style: "loud"}} },
 		"action link not absolute":   func(e *Envelope) { e.Actions = []Action{Link("open", "Open", "cards/1")} },
+		"destinations on personal":   func(e *Envelope) { e.DestinationIDs = []string{orgID} },
+		"destination not a uuid": func(e *Envelope) {
+			e.OrgID, e.Visibility, e.DestinationIDs = orgID, VisibilityOrg, []string{"~alerts"}
+		},
+		"eleven destinations": func(e *Envelope) {
+			e.OrgID, e.Visibility = orgID, VisibilityOrg
+			for range 11 {
+				e.DestinationIDs = append(e.DestinationIDs, orgID)
+			}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -54,6 +64,7 @@ func TestValidateAcceptsARichOrgEvent(t *testing.T) {
 		Callback("ack", "OK"),
 		Callback("snooze", "Later"),
 	}
+	e.DestinationIDs = []string{"44444444-4444-4444-4444-444444444444"}
 	e.Title = strings.Repeat("я", 200) // characters, not bytes
 	if err := e.Validate(); err != nil {
 		t.Fatalf("valid org event rejected: %v", err)

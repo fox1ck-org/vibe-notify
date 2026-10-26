@@ -7,7 +7,7 @@ threading — belongs to the hub.
 
 ## How to connect a product
 
-1. **Take the module.** `go get github.com/fox1ck-org/vibe-notify@v0.3.0` (public; the
+1. **Take the module.** `go get github.com/fox1ck-org/vibe-notify@v0.4.0` (public; the
    default `GOPROXY` resolves it — no `GOPRIVATE` needed).
 2. **Wire the env.** Set `NOTIFY_HUB_URL` (and `NOTIFY_HMAC_SECRET` when the hub
    checks signatures) in the product's manifest in vibe-infra; the secret comes from
@@ -26,6 +26,7 @@ threading — belongs to the hub.
    env.Deeplink = "https://cards.igrudsky.dev/cards/" + id
    env.Resource = notify.Res("card", id, "Visa *4242", env.Deeplink)
    env.Facts = []notify.Fact{notify.F("Balance", "$12.40")}         // ≤ 10
+   env.DestinationIDs = rule.DestinationIDs                          // optional: org destinations the source itself picked (≤ 10)
    env.Actions = []notify.Action{                                     // ≤ 4
        notify.Link("open", "Open", env.Deeplink).Primary(),
        notify.Callback("unfreeze", "Unfreeze"),                       // hub calls the product back

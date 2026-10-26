@@ -129,6 +129,10 @@ type Envelope struct {
 	// Actions become buttons, at most MaxActions. Build them with Link
 	// (opens a URL) or Callback (the hub calls the product back).
 	Actions []Action `json:"actions,omitempty"`
+	// DestinationIDs are destinations of OrgID the source itself picked (a
+	// rule's "send to ~channel"), delivered besides the org's own rules, at
+	// most MaxDestinations. Org events only; unknown ids are skipped by the hub.
+	DestinationIDs []string `json:"destination_ids,omitempty"`
 }
 
 // MarshalJSON sends a shared-only event's empty recipients as [] rather than

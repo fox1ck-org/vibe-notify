@@ -15,6 +15,8 @@ import (
 const (
 	MaxFacts   = 10
 	MaxActions = 4
+	// MaxDestinations caps Envelope.DestinationIDs.
+	MaxDestinations = 10
 
 	maxResourceKind  = 64
 	maxResourceID    = 160
@@ -125,6 +127,17 @@ func (e Envelope) validateOrgFields() error {
 		}
 		if err := optionalURL("resource.url", r.URL); err != nil {
 			return err
+		}
+	}
+	if len(e.DestinationIDs) > MaxDestinations {
+		return fmt.Errorf("notify: %d destination_ids, at most %d", len(e.DestinationIDs), MaxDestinations)
+	}
+	if len(e.DestinationIDs) > 0 && e.Visibility != VisibilityOrg {
+		return fmt.Errorf("notify: destination_ids need visibility %q", VisibilityOrg)
+	}
+	for i, id := range e.DestinationIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			return fmt.Errorf("notify: destination_ids[%d] must be a uuid, got %q", i, id)
 		}
 	}
 	if len(e.Facts) > MaxFacts {
